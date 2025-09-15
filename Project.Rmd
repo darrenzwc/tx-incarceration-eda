@@ -1,0 +1,376 @@
+---
+title: "Project"
+author: "Darren Chan"
+date: "2024-10-16"
+output: html_document
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE,  
+                      warning = TRUE, message = FALSE, 
+                      fig.align = "center",
+                      R.options = list(max.print=100))
+```
+
+## Analysis of Incarceration in Texas
+
+![](images/clipboard-3324088034.png){width="360"}
+
+Dataset Used : [Incarceration in Texas](https://data.texas.gov/dataset/High-Value-Dataset-August-2024/kdeh-puvj/about_data)
+
+The United States has one of the highest incarceration rates globally, with Texas contributing significantly to this statistic due to its large population and historically stringent criminal justice policies. Studies such as "The Growth of Incarceration in the United States" by the National Research Council (2014) have shown that factors like offense severity, race, and age often play crucial roles in sentencing and parole decisions. I do expect from analyzing trends that certain demographics will have a greater impact, whether it be unbiased or not, concerning sentences and approval of parole.
+
+Provided through the City of Austin Open Data Portal, this dataset provides information on current inmates in the state of Texas. Each row in this dataset represents a current inmate and are provided with 20 variables such as offense committed, parole decision, date of offense, sentence, and many more. Crimes committed by inmates date back to 1984 and to present day.
+
+My main focus of this project is to analyze what demographic factors influence the chance of parole.
+
+-   **Name** - The name of the incarcerated individual.
+-   **Current Facility** - The prison or facility where the individual is currently being held.
+-   **Gender** - The gender of the individual, typically recorded as male or female.
+-   **Race** - The racial classification of the individual, such as White, Black, Hispanic, etc.
+-   **Age** - The current age of the individual.
+-   **County** - The county in Texas where the offense or trial took place.
+-   **TDCJ Offense** - The specific criminal offense for which the individual was convicted.
+-   **Sentence Date** - The date on which the individual was sentenced for their offense.
+-   **Offense Date** - The date on which the offense took place.
+-   **Sentence** - The length of the sentence given to the individual, often in years, or designated as "Life."
+-   **Last Parole Decision** - The outcome of the most recent parole hearing, typically "Approved" or "Denied."
+-   **Offense Category** - A broader classification of the offense, such as Violent Crime, Drug Crime, Property Crime, etc.
+
+# Quick view of the Dataset
+
+Import necessary packages and download dataset
+
+```{r, warning=FALSE}
+library(tidyverse)
+library(readr)
+library(sf)
+library(plotROC) 
+incarceration_tx <- read_csv("incarceration.csv")
+```
+
+# Data Wrangling
+
+Starting with an initial count of rows and columns, rows with missing values in critical columns like `TDCJ Offense` were filtered out to maintain accuracy. This filtering step removed rows where the offense type was not recorded, as these records would not contribute meaningfully to categorizing offenses or analyzing parole outcomes.
+
+Next, using `mutate()` and `case_when()`, offenses were grouped into broader, well-defined categories, such as “Crimes Against the Vulnerable,” “Sex Crimes,” “Drug Crimes,” and others, to allow meaningful comparison across offense types. This categorization simplified the complexity of offense names, which initially had varying formats and descriptors, creating a cleaner and more interpretable dataset. Finally, the resulting dataset was confirmed to be in a tidy format, with each variable in its column and each observation in its row, ready for further analysis on trends and relationships related to parole decisions and offense characteristics.
+
+### Broader Offense Categories
+
+-   Violent Crimes
+
+-   Sex Crimes
+
+-   Drug Crimes
+
+-   Property Crimes
+
+-   Driving Offenses
+
+-   Probation and Compliance Violations
+
+-   Harassment and Intimidation Crimes
+
+-   Violent Crimes
+
+-   Organized/White Collar Crimes
+
+-   Weapon Related Crimes
+
+-   Miscellaneous
+
+```{r, warning=FALSE}
+
+# Implement group by so its easier to see all the different crimes.
+incarceration_tx <- incarceration_tx |>
+  mutate(offense_category = case_when(
+    # Crimes Against The Vulnerable
+    str_detect(`TDCJ Offense`, regex("CHILD|CHIILD|CHLD|CHI|KIDNAP|KID|PORN|ELD|DISA|YOUNG|MINOR|ONLINE|VOY|18|17", ignore_case = TRUE)) ~ "Crimes Against The Vulnerable",
+    
+    # Sex Crimes
+    str_detect(`TDCJ Offense`, regex("SXL|SEX|SX|INDECENCY|ABUSE|RAPE|SOD|PROST|INCEST|OFF", ignore_case = TRUE)) ~ "Sex Crimes",
+    
+    # Drug Crimes
+    str_detect(`TDCJ Offense`, regex("MANU|DELIV|CS|METH|COCAINE|HEROIN|AMPHETAMINE|SUB|MARI|C/S|DEL|PID|-200|MAR|FENT|PHEN|0G|1G|2G|3G|4G|TETRA|LBS|MJ", ignore_case = TRUE)) ~ "Drug Crimes",
+    
+    # Property Crimes
+    str_detect(`TDCJ Offense`, regex("THFT|THEFT|BUG|BUR|BURG|ARSON|MISCH|PROP", ignore_case = TRUE)) ~ "Property Crime",
+    
+    # Driving Offenses
+    str_detect(`TDCJ Offense`, regex("DWI|INTOX|DRIVING|MTR|MV|VEHICLE|UUMV|UUV|VEH", ignore_case = TRUE)) ~ "Driving Offenses",
+    
+    # Probation and Compliance Violations
+    str_detect(`TDCJ Offense`, regex("FAILURE|BAIL|COMPLY|CIVIL|TAM|TAMP|PROH|CORR|PENAL|FTA|IMPERS|EVAD|ESCAPE|RETAL|EVID|FAIL|INTER|FALSE", ignore_case = TRUE)) ~ "Probation/Compliance Violation",
+    
+    # Harassment and Intimidation Crimes
+    str_detect(`TDCJ Offense`, regex("HARRASS|HARASS|STALKING|IMPROPER|RIOT|THREAT|INDECEN|IMP|INV", ignore_case = TRUE)) ~ "Harassment/Intimidation Crime",
+        
+    # Violent Crimes
+    str_detect(`TDCJ Offense`, regex("CAPITAL|MUR|VIOL|VIO|ROB|MANSLAUGHTER|DEAD|AGG |ASSLT|ASLT|ASSAULT|DDLY|DWPN|MANS|MNS|SBI|TERR|INJURY|HOMICIDE|MRDER", ignore_case = TRUE)) ~ "Violent Crime",
+    
+    # Organized/White Collar Crimes
+    str_detect(`TDCJ Offense`, regex("ORG|FIN|FRD|FRAUD|FORG|INVEST|LAUNDER|SMUGG|TRAFF|DISPOSE|FORGERY|FRAD|FRAUD|BRIBERY|PERJURY|CREDIT|COUNTER|TRUST|GANG", ignore_case = TRUE)) ~ "Organized/White Collar Crime",
+    
+    # Weapon-Related Crimes
+    str_detect(`TDCJ Offense`, regex("FIREARM|WEAPON|DEADLY|WPN|DW|CARRY|ARM|UNLAW POSS", ignore_case = TRUE)) ~ "Weapon-Related Crime",
+    # Miscellaneous
+    TRUE ~ "Miscellaneous"
+  )) |>
+  # Filter out rows where TDCJ Offense is NA 
+  filter(!is.na(`TDCJ Offense`))
+```
+
+## Quick View of the Tidied Dataset
+
+There are **134190** unique rows (each row represents a **inmate record**) and **21** columns.
+
+```{r}
+# Displays # of rows and columns as well as the sample of the first 10 rows in the dataset
+nrow(incarceration_tx)
+ncol(incarceration_tx)
+head(incarceration_tx,n = 10)
+```
+
+### Exploration of Inmates Ages
+
+The age distribution of inmates in the dataset shows a relatively normal distribution, with the highest concentration of inmates aged between 25 and 50. According to the summary statistics, the minimum age is 17, and the maximum age is 93, with a median age of 40 and a mean age of approximately 41.39. This suggests that the majority of incarcerated individuals are within their middle-aged years, with fewer younger and older individuals.
+
+```{r}
+# Provides a summary and histogram of the distribution of inmates ages
+summary(incarceration_tx$Age)
+incarceration_tx |>
+  ggplot(aes(x = Age)) +
+  geom_histogram(binwidth = 5, center = 2.5, fill = "steelblue", color = "black") +
+  labs(title = "Age Distribution of Inmates", x = "Age", y = "Count") +
+  theme_minimal()
+```
+
+### Exploration of Top Offenses Committed
+
+The bar chart shows top categories of offenses committed by inmates in Texas. **Violent crimes** are the most common type, with nearly 50,000 inmates, reflecting a significant proportion of the prison population. This category includes serious offenses like murder, assault, and other acts involving harm to individuals, which may explain the high count due to longer sentences for these types of crimes.
+
+**Crimes Against the Vulnerable**, such as offenses targeting children, the elderly, or disabled individuals, are also notably high, suggesting that protective laws result in stringent sentencing for these offenses. **Drug-related crimes**, the third most frequent category, indicate a large number of inmates incarcerated for possession, trafficking, or manufacturing controlled substances, aligning with national trends regarding the war on drugs. Lastly, driving offenses, though fewer in comparison, still represent a substantial number of cases, likely due to offenses related to impaired driving.
+
+```{r}
+# Groups and counts the frequency of each offense and shows the top 10
+top_offenses <- incarceration_tx |>
+  group_by(offense_category) |>
+  summarise(freq = n()) |>
+  slice_max(freq, n = 4)
+
+# crreate a histogram using ggplot and flips to easily read the type of offense
+ggplot(top_offenses, aes(x = reorder(`offense_category`, freq), y = freq)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() + 
+  labs(x = "TDCJ Offense", y = "Number of Inmates", title = "Top TDCJ Offenses by Inmate Population") +
+   theme_classic()
+
+```
+
+### Exploration of Crime Trends from 1984-2023
+
+The line graph displays the annual trends in crime categories for Texas from 1984 to 2024. Notably, violent crimes have seen a significant increase over time, peaking in the early 2020s. Drug crimes also show a high rise, particularly around 2010, while crimes against vulnerable populations and driving offenses have more moderate, yet consistent, upward trends. However, both violent and drug crimes have seen slight declines in recent years.
+
+The COVID-19 pandemic had a notable impact on incarceration trends in several ways, affecting both the rate of new incarcerations and conditions within prisons. During the pandemic, many states, including Texas, implemented policies to reduce the prison population to limit the spread of COVID-19 within correctional facilities.
+
+Courts and law enforcement agencies were encouraged to decrease arrests for nonviolent offenses, and some minor offenses were diverted to alternatives like fines or community service. Court closures and reduced operations also contributed to fewer new incarcerations, as trials and sentencing were delayed. This resulted in a significant backlog in the judicial system, which may have led to fewer convictions and incarcerations during the peak of the pandemic.
+
+```{r}
+# Convert date format of offense date to get the year
+# Get the top 4 categories of broader categories classified
+top_crimes <- incarceration_tx |>
+  mutate(
+    `Offense Date` = mdy(`Offense Date`),
+    Year = year(`Offense Date`)
+  ) |>
+  group_by(offense_category) |>
+  summarize(total_count = n(), .groups = 'drop') |>
+  top_n(5, total_count)
+
+# Filter the main data to include only top 4 categories
+# Categorizes the year of the offense committed to the number committed
+crime_data <- incarceration_tx |>
+  mutate(
+    `Offense Date` = mdy(`Offense Date`),
+    Year = year(`Offense Date`)
+  ) |>
+  filter(offense_category %in% top_crimes$offense_category) |>
+  filter(Year >= 1984 & Year <= 2023) |>
+  group_by(Year, offense_category) |>
+  summarize(count = n(), .groups = 'drop')
+
+# Creates a line plot demonstrating the number of crimes committed in each category per year and editing the breaks by 4 years and crime counts by 1000
+ggplot(crime_data, aes(x = Year, y = count, color = offense_category)) +
+  geom_line(size = 1) +
+  labs(
+    title = "Annual Crime Trends from 1984-2024",
+    x = "Year",
+    y = "Number of Crimes",
+    color = "Crime Category"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(1984, 2023, by = 4)) +
+  scale_y_continuous(breaks = seq(0, max(crime_data$count), by = 1000))
+
+```
+
+### Exploration of Parole Decisions by Gender
+
+The data indicates that gender may play a role in parole decision outcomes. The higher approval rate for females suggests possible differences in factors such as criminal history, offense types, behavior during incarceration, or policy considerations that may influence parole board decisions. It is worth noting that this observation could be impacted by a variety of underlying factors, including the types of crimes committed or the inmates' conduct while incarcerated, which might correlate with gender in this dataset.
+
+```{r}
+# Create a new column for parole decision status and categorize as "Approved" or "Denied"
+incarceration_tx <- incarceration_tx |>
+  mutate(
+    Parole_Decision = case_when(
+      str_detect(`Last Parole Decision`, regex("approved", ignore_case = TRUE)) ~ "Approved",
+      str_detect(`Last Parole Decision`, regex("denied", ignore_case = TRUE)) ~ "Denied",
+      TRUE ~ NA_character_  # For any other values, set to NA
+    )
+  )
+
+# Filter out rows where Parole_Decision is NA to only include "Approved" or "Denied" cases
+incarceration_tx <- incarceration_tx |>
+  filter(!is.na(Parole_Decision))
+
+# Plot the comparison of parole decisions by gender
+ggplot(incarceration_tx, aes(x = Gender, fill = Parole_Decision)) +
+  geom_bar(position = "fill") +  # Position as fill to show proportions
+  labs(
+    title = "Parole Decision Outcomes by Gender",
+    x = "Gender",
+    y = "Proportion of Parole Decisions",
+    fill = "Parole Decision"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = c("Approved" = "lightgreen", "Denied" = "lightcoral"))
+
+
+```
+
+### Exploration of Parole Decisions by Offenses
+
+This visualization suggests that the nature of the offense significantly impacts parole outcomes. Violent crimes, often associated with greater societal harm, are less likely to result in parole approval. In contrast, offenses against vulnerable populations, which may vary in severity, have comparatively higher approval rates. These trends align with societal and judicial perspectives on crime severity and rehabilitation prospects.
+
+```{r}
+# Get the top 4 offense categories by count of parole decisions
+top_categories <- incarceration_tx |>
+  count(offense_category) |>
+  top_n(4, n) |>
+  pull(offense_category)
+
+# Filter the dataset to include only the top 4 offense categories
+top_incarceration_tx <- incarceration_tx |>
+  filter(offense_category %in% top_categories)
+
+# Plot the comparison of parole decisions based off the offense committed
+ggplot(top_incarceration_tx, aes(x = offense_category, fill = Parole_Decision)) +
+  geom_bar(position = "fill", width = 0.5) +
+  labs(
+    title = "Parole Decision Outcomes by Top 4 Offense Categories",
+    x = "Offense Category",
+    y = "Proportion of Parole Decisions",
+    fill = "Parole Decision"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = c("Approved" = "lightgreen", "Denied" = "lightcoral"))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+```
+
+### Model
+
+```{r}
+data <- incarceration_tx |>
+  mutate(parole_binary = ifelse(str_detect(`Last Parole Decision`, "Approved"), 1, 0))
+
+model <- glm(parole_binary ~ Gender + Race + Age + `TDCJ Offense` + `Sentence (Years)`, 
+             data = data, 
+             family = binomial)
+
+data <- data |>
+  mutate(predictions = predict(model, type = "response"))
+ 
+ROC <- data |>
+  ggplot() + 
+  # the predictions are based on the probability values
+  geom_roc(aes(d = parole_binary, m = predictions), n.cuts = 10)
+ROC
+```
+
+```{r}
+calc_auc(ROC)$AUC
+# Choose number of folds
+k = 5 
+
+# To have the same random sample, use set.seed
+set.seed(322)
+
+# Randomly order rows in the dataset
+data <- data[sample(nrow(data)), ] 
+
+# Create k folds from the dataset
+folds <- cut(seq(1:nrow(data)), breaks = k, labels = FALSE)
+
+# Initialize a vector to keep track of the performance for each k-fold
+perf_k <- NULL
+
+# Use a for-loop to get performance for each k-fold
+for(i in 1:k){
+  # Split data into train and test data
+  train_not_i <- data[folds != i, ] # train data = all observations except in fold i
+  test_i <- data[folds == i, ]  # test data = observations in fold i
+  
+  # Train model on train data (all but fold i)
+  # CHANGE: what model/predictors should be included
+  train_model <- glm(parole_binary ~ Gender + Race + Age + `Sentence (Years)`, 
+             data = data, 
+             family = binomial)
+  
+  # Performance listed for each test data = fold i
+  # CHANGE: how the performance is calculated
+  perf_k[i] <- calc_auc(
+  # Make a ROC curve
+  ggplot(test_i) + 
+    geom_roc(aes(
+      # Outcome is Survived
+      d = parole_binary,,
+      # Probability of surviving based on the logistic model
+      m = predict(train_model, newdata = test_i, type = "response")))
+  )$AUC
+}
+
+# Performance for each fold 
+perf_k
+```
+
+# Discussion
+
+**Parole Decision Analysis**: Parole decisions showed distinct trends based on race, gender, and type of offense. For instance, data indicated that certain offenses, such as violent crimes, were associated with a higher denial rate compared to others. The visualization of parole decisions by gender revealed that parole approval rates varied between male and female inmates, although differences were moderate. This reflects potential biases in decision-making criteria or variations in the nature of offenses by gender.
+
+**Age Distribution**: The age distribution of the incarcerated population showed a concentration among individuals aged 25-50, with the median age at approximately 40 years. This aligns with expectations, as individuals in this age range are often most active within society and, therefore, more likely to encounter the legal system. The relatively lower count of younger and older inmates could reflect both societal behavioral trends and judicial sentencing practices that take age into consideration.
+
+**Top Offenses**: Violent crimes were by far the most common offense type, followed by crimes against vulnerable populations, drug offenses, and driving-related offenses. However, the high representation of drug crimes indicates a continued impact of the "War on Drugs" approach, leading to significant incarceration for non-violent offenses.
+
+**Trends Over Time**: When examining trends over the period from 1984 to 2024, there was a clear increase in certain offenses, with spikes in violent crimes and drug-related offenses in recent years. Interestingly, the data showed a dip in incarceration trends around 2020, likely influenced by the COVID-19 pandemic, as courts and prisons adjusted operations. This temporary reduction could offer insights into how systemic changes affect incarceration rates.
+
+# Reflections
+
+The data matched some expectations—such as the predominance of violent crimes—but also contained surprising trends, particularly the continued high rates of incarceration for drug-related offenses. These trends raise questions about the effectiveness and societal costs of current policies. If presented to policymakers in Austin, the primary takeaway would be that certain categories, like drug offenses, remain a major contributor to incarceration, suggesting that policy shifts, especially for non-violent crimes, could reduce the prison population and address systemic issues.
+
+Data quality posed some challenges, including inconsistencies in offense category coding and missing or ambiguous parole decision data. Addressing these inconsistencies could improve the accuracy and reliability of future analyses. The most challenging aspect was wrangling and categorizing offense types accurately, as multiple abbreviations and inconsistent entries required extensive standardization.
+
+# Acknowledgments and References
+
+I would like to thank our TAs and instructors for their guidance, as well as the City of Austin Open Data Portal for allowing me to make my analysis on the incarceration in Texas possible.
+
+## References
+
+[Incarceration in Texas Dataset](https://data.texas.gov/dataset/High-Value-Dataset-August-2024/kdeh-puvj/about_data)
+
+[Reduction in Prison Population](https://texascjc.org/spend-your-values/close-more-prisons-and-reallocate-dollars-community-needs-and-crime-prevention)
+
+[COVID-19 Outbreaks in Prisons](https://lbj.utexas.edu/new-report-reveals-devastating-toll-covid-19-texas-prisons-and-jails)
+
+[Policy Responses](https://www.prisonlegalnews.org/news/2021/nov/1/fifth-circuit-overturns-permanent-injunction-requiring-texas-prison-observe-covid-19-precautions/)
